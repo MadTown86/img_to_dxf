@@ -1,6 +1,10 @@
 """
-image_to_dxf.py  —  PNG/JPG → Closed Contour DXF for SolidWorks multi-color 3D printing
+image_to_dxf.py  —  PNG/JPG → Closed Contour DXF for SolidWorks / Fusion 360 / multi-color 3D printing
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DXF FORMAT: R12 (AC1009) — universally compatible with Fusion 360, SolidWorks,
+AutoCAD, LibreCAD, and all other CAD tools. Uses POLYLINE/VERTEX/SEQEND entities
+(not LWPOLYLINE) so no BLOCKS or OBJECTS sections are required.
+
 USAGE (in VSCode terminal or any command prompt):
 
   Basic:
@@ -14,24 +18,6 @@ USAGE (in VSCode terminal or any command prompt):
 
   No preview image:
       python image_to_dxf.py image.png --no-preview
-
-      # Custom output folder
-python image_to_dxf.py BASS_PNG.png --output ./output/bass.dxf
-
-# Simple cartoon/logo (fewer colors, faster)
-python image_to_dxf.py BULLS_PNG.png --colors 6 --min-area 300
-
-# Complex detailed image
-python image_to_dxf.py DRAGON_PNG.png --colors 14 --simplify 0.001 --min-area 150
-
-# Skip preview (faster, DXF only)
-python image_to_dxf.py STEG_PNG.png --no-preview
-
-# Scale to specific print size (0.2 mm/px = 160mm wide for a 800px image)
-python image_to_dxf.py TRI_PNG.png --scale 0.2
-
-# See all options
-python image_to_dxf.py --help
 
   Full example:
       python image_to_dxf.py BASS_PNG.png --colors 10 --blur 2 --min-area 250 --simplify 0.0015 --arc-tol 3.0 --scale 0.1
@@ -203,48 +189,53 @@ def add_bulges(simp, orig, arc_tol):
 
 def build_dxf(layers, W, H, scale):
     """
-    Produce an AC1015 DXF string with one closed LWPOLYLINE per contour.
-    Y-axis is flipped so the drawing is right-side-up in CAD (0,0 = bottom-left).
+    Build an R12 (AC1009) DXF — the most universally compatible format.
+
+    Why R12 instead of R2000 (AC1015)?
+      • R2000 requires BLOCKS + OBJECTS sections and subclass markers on every
+        entity. Missing any of these causes Fusion 360 (and others) to silently
+        reject the file with no error message.
+      • R12 needs only HEADER + TABLES + BLOCKS (empty) + ENTITIES. Much simpler,
+        and every CAD tool since the 1990s can read it perfectly.
+
+    Entities: POLYLINE / VERTEX / SEQEND (R12 equivalent of LWPOLYLINE).
+      - POLYLINE flag 70 = 1  → closed 2D polyline
+      - VERTEX  flag 70 = 0  → ordinary 2D vertex
+      - Bulge encoded on VERTEX via group code 42 (same semantics as LWPOLYLINE)
+
+    Coordinate system: Y-axis is flipped (image Y=0 at top → CAD Y=0 at bottom).
     """
-    L = []
-    hdl = [200]
-
-    def H_():
-        hdl[0] += 1
-        return format(hdl[0]-1, 'X').zfill(3)
-
-    # AutoCAD Color Index values — each layer gets a distinct colour in CAD
+    L   = []
     ACI = [1,2,3,4,5,6,7,30,40,50,60,70,80,90,100,110,120,130,140,150]
 
     # ── HEADER ──────────────────────────────────────────────────────
     L += [
         '  0','SECTION','  2','HEADER',
-        '  9','$ACADVER','  1','AC1015',
-        '  9','$INSBASE',' 10','0.0',' 20','0.0',' 30','0.0',
-        '  9','$EXTMIN',' 10','0.0',' 20','0.0',' 30','0.0',
-        '  9','$EXTMAX',
-            ' 10', f'{W*scale:.4f}',
-            ' 20', f'{H*scale:.4f}',
-            ' 30', '0.0',
-        '  9','$INSUNITS',' 70','4',   # 4 = millimetres
+        '  9','$ACADVER',  '  1','AC1009',          # R12
+        '  9','$INSBASE',  ' 10','0.0',' 20','0.0',' 30','0.0',
+        '  9','$EXTMIN',   ' 10','0.0',' 20','0.0',
+        '  9','$EXTMAX',   ' 10',f'{W*scale:.4f}',' 20',f'{H*scale:.4f}',
+        '  9','$INSUNITS', ' 70','4',               # 4 = millimetres
         '  0','ENDSEC',
     ]
 
-    # ── TABLES ──────────────────────────────────────────────────────
+    # ── TABLES (no subclass markers needed in R12) ───────────────────
     L += [
         '  0','SECTION','  2','TABLES',
-        '  0','TABLE','  2','LTYPE','  5',H_(),'100','AcDbSymbolTable',' 70','1',
-        '  0','LTYPE','  5',H_(),'100','AcDbSymbolTableRecord',
-            '100','AcDbLinetypeTableRecord',
-            '  2','Continuous',' 70','0','  3','Solid',' 72','65',' 73','0',' 40','0.0',
+        # Line-type table
+        '  0','TABLE','  2','LTYPE',' 70','1',
+        '  0','LTYPE',
+            '  2','Continuous',
+            ' 70','0',
+            '  3','Solid line',
+            ' 72','65',' 73','0',' 40','0.0',
         '  0','ENDTAB',
-        '  0','TABLE','  2','LAYER','  5',H_(),'100','AcDbSymbolTable',
-            ' 70', str(len(layers)),
+        # Layer table — one entry per colour layer
+        '  0','TABLE','  2','LAYER',' 70',str(len(layers)),
     ]
     for i, lay in enumerate(layers):
         L += [
-            '  0','LAYER','  5',H_(),
-            '100','AcDbSymbolTableRecord','100','AcDbLayerTableRecord',
+            '  0','LAYER',
             '  2', lay['name'],
             ' 70','0',
             ' 62', str(ACI[i % len(ACI)]),
@@ -252,25 +243,46 @@ def build_dxf(layers, W, H, scale):
         ]
     L += ['  0','ENDTAB','  0','ENDSEC']
 
-    # ── ENTITIES — one closed LWPOLYLINE per contour ─────────────────
+    # ── BLOCKS (empty section — required even in R12) ────────────────
+    L += ['  0','SECTION','  2','BLOCKS','  0','ENDSEC']
+
+    # ── ENTITIES ─────────────────────────────────────────────────────
+    # Each contour → one closed POLYLINE made up of VERTEX records + SEQEND
     L += ['  0','SECTION','  2','ENTITIES']
+
     for lay in layers:
         for cont in lay['contours']:
             if len(cont) < 3:
                 continue
+
+            # POLYLINE header
             L += [
-                '  0','LWPOLYLINE','  5',H_(),
-                '100','AcDbEntity','  8', lay['name'],
-                '100','AcDbPolyline',
-                ' 90', str(len(cont)),
-                ' 70','1',            # closed flag
+                '  0','POLYLINE',
+                '  8', lay['name'],     # layer
+                ' 66','1',              # vertices follow flag
+                ' 70','1',              # flag bit 0 = closed polyline
+                ' 10','0.0',            # dummy X (required placeholder in R12)
+                ' 20','0.0',            # dummy Y
+                ' 30','0.0',            # elevation = 0
             ]
+
+            # One VERTEX per simplified contour point
             for v in cont:
-                # Flip Y so drawing origin is bottom-left (standard CAD)
-                L += [' 10', f"{v['x']*scale:.5f}",
-                      ' 20', f"{(H - v['y'])*scale:.5f}"]
+                x =  v['x']        * scale
+                y = (H - v['y'])   * scale  # flip Y for CAD convention
+                L += [
+                    '  0','VERTEX',
+                    '  8', lay['name'],
+                    ' 10', f'{x:.5f}',
+                    ' 20', f'{y:.5f}',
+                    ' 30','0.0',
+                    ' 70','0',          # ordinary 2D polyline vertex
+                ]
                 if abs(v.get('bulge', 0)) > 1e-6:
                     L += [' 42', f"{v['bulge']:.7f}"]
+
+            # SEQEND marks the end of this polyline's vertices
+            L += ['  0','SEQEND','  8', lay['name']]
 
     L += ['  0','ENDSEC','  0','EOF']
     return '\n'.join(L)
@@ -420,11 +432,17 @@ def process(input_path, output_dxf, output_preview,
   {C.WHITE}Total vertices:{C.RESET}  {total_verts:,}
   {C.WHITE}Arc segments  :{C.RESET}  {total_arcs:,}  ({arc_pct}% of edges are arcs)
   {C.WHITE}Drawing size  :{C.RESET}  {dim_mm}  (at {scale} mm/px)
+  {C.WHITE}DXF format    :{C.RESET}  R12 / AC1009  (POLYLINE · VERTEX · SEQEND)
   {C.WHITE}File size     :{C.RESET}  {len(dxf_text)/1024:.1f} KB
   {C.WHITE}Time elapsed  :{C.RESET}  {elapsed:.1f}s
 {C.BOLD}{C.GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}
 
-  {C.CYAN}SolidWorks tip:{C.RESET}
+  {C.CYAN}Fusion 360:{C.RESET}
+  Insert ▸ Insert DXF  (or drag the .dxf onto the canvas).
+  All contours land on a single sketch — right-click layers
+  in the browser panel to isolate individual colour regions.
+
+  {C.CYAN}SolidWorks:{C.RESET}
   File ▸ Open ▸ select DXF ▸ open as 2D sketch.
   Select all contours ▸ Boss-Extrude ▸ use "Multi-body" option.
   Export as STL ▸ import into Bambu Studio ▸ split objects.
