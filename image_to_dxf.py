@@ -15,6 +15,24 @@ USAGE (in VSCode terminal or any command prompt):
   No preview image:
       python image_to_dxf.py image.png --no-preview
 
+      # Custom output folder
+python image_to_dxf.py BASS_PNG.png --output ./output/bass.dxf
+
+# Simple cartoon/logo (fewer colors, faster)
+python image_to_dxf.py BULLS_PNG.png --colors 6 --min-area 300
+
+# Complex detailed image
+python image_to_dxf.py DRAGON_PNG.png --colors 14 --simplify 0.001 --min-area 150
+
+# Skip preview (faster, DXF only)
+python image_to_dxf.py STEG_PNG.png --no-preview
+
+# Scale to specific print size (0.2 mm/px = 160mm wide for a 800px image)
+python image_to_dxf.py TRI_PNG.png --scale 0.2
+
+# See all options
+python image_to_dxf.py --help
+
   Full example:
       python image_to_dxf.py BASS_PNG.png --colors 10 --blur 2 --min-area 250 --simplify 0.0015 --arc-tol 3.0 --scale 0.1
 
